@@ -1,0 +1,5 @@
+---
+- hosts: oshiftMachines
+  roles:
+    - machinePrep
+    - dockerConfig
