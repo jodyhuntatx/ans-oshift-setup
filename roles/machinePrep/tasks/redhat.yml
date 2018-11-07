@@ -1,41 +1,45 @@
 ---
+- name: Red Hat subscription account creds
+  include_vars:
+    file: rhel_sub.yml
 
-- name: Check if EPEL repo is already configured.
-  stat: path={{ epel_repofile_path }}
-  register: epel_repofile_result
+- name: Host registration & repo configuration
+  shell: |
+    subscription-manager register --username="{{ rhel_sub_account }}" --password="{{ rhel_sub_password }}"
+    subscription-manager attach
+    subscription-manager refresh
+    subscription-manager repos --disable="*" > /dev/null
+    yum-config-manager --disable \* > /dev/null
+    subscription-manager attach --pool={{ rhel_sub_pool_id }}
+    subscription-manager repos \
+      --enable="rhel-7-server-rpms" \
+      --enable="rhel-7-server-extras-rpms" \
+      --enable="rhel-7-server-ose-3.10-rpms" \
+      --enable="rhel-7-server-ansible-2.4-rpms" \
+      --enable="rhel-7-fast-datapath-rpms" \
+      --enable="rh-gluster-3-client-for-rhel-7-server-rpms"
 
-- name: Install EPEL repo.
-  yum:
-    name: "{{ epel_repo_url }}"
-    state: present
-  register: result
-  until: 'result.rc == 0'
-  retries: 5
-  delay: 10
-  when: not epel_repofile_result.stat.exists
-
-- name: Import EPEL GPG key.
-  rpm_key:
-    key: "{{ epel_repo_gpg_key_url }}"
-    state: present
-  when: not epel_repofile_result.stat.exists
-  ignore_errors: "{{ ansible_check_mode }}"
-
-- name: installDependencies
+- name: Install base packages
   yum:
     name: "{{ packages }}"
     update_cache: yes
     state: latest
   vars:
     packages:
-    - python
-    - curl
     - wget
+    - git
+    - net-tools
+    - bind-utils
+    - yum-utils
+    - iptables-services
+    - bridge-utils
+    - bash-completion
+    - kexec-tools
+    - sos
+    - psacct
+    - python-docker-py
+    - skopeo
+    - openvswitch
 
-- name: install jq
-  shell: "cd /usr/bin; wget -O jq https://github.com/stedolan/jq/releases/download/jq-1.5/jq-linux64; chmod +x ./jq"
-
-- name: Install pip from script
-  shell: |
-    wget https://bootstrap.pypa.io/get-pip.py
-    python get-pip.py
+- name: Reboot machine with latest packages
+  reboot:

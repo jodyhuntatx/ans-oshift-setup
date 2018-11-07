@@ -1,48 +1,67 @@
 ---
-- name: installDependencies
+
+- name: install Docker
   yum:
     name: "{{ packages }}"
     update_cache: yes
-    state: latest
-  vars:
-    packages:
-    - yum-utils
-    - device-mapper-persistent-data
-    - lvm2
-
-- name: removeDocker
-  yum:
-    name: "{{ packages }}"
-    state: absent
+    state: present
   vars:
     packages:
     - docker
-    - docker.io
-    - docker-common
-    - docker-engine
-
-- name: add docker repository
-  get_url:
-    url: "{{ docker_yum_repo_url }}"
-    dest: /etc/yum.repos.d/docker-{{ docker_edition }}.repo
-    owner: root
-    group: root
-
-- name: install container-selinux package
-  yum:
-    name: "http://mirror.centos.org/centos/7/extras/x86_64/Packages/container-selinux-2.42-1.gitad8f0f7.el7.noarch.rpm"
-    state: present
-    update_cache: yes
-
-- name: installDocker
-  yum:
-    name: "{{ docker_package }}"
-    update_cache: yes
-    state: present
   notify: "start docker"
 
-- name: Install docker for python
-  pip:
-    name: "docker==2.7.0"
-    state: latest
-    extra_args: --ignore-installed
+#- name: Configure overlay2 storage driver
+#  copy:
+#    dest: /etc/docker/daemon.json
+#    content: |
+#      {
+#        "storage-driver": "overlay2",
+#        "storage-opts": [
+#          "overlay2.override_kernel_check=true"
+#        ]
+#      }
+
+# Using storage config Option A
+# See https://docs.openshift.com/container-platform/3.10/install/host_preparation.html#configuring-docker-thin-pool
+- name: Write docker storage config to docker-storage-setup 
+  copy:
+    content: |
+      DEVS=sdb
+      VG=docker-vg
+    dest: '/etc/sysconfig/docker-storage-setup'
+  register: docker_storage
+
+- name: Run docker-storage-setup 
+  command: docker-storage-setup
+  when: docker_storage.changed
+
+- name: Enable the docker service
+  systemd:
+    name: docker
+    enabled: yes
+    masked: no
+    state: started
+
+- name: Install docker-novolume-plugin (takes 2 minutes)
+  yum:
+    name: "docker-novolume-plugin"
+
+- name: Enable the docker-novolume-plugin service
+  systemd:
+    name: docker-novolume-plugin
+    enabled: yes
+    masked: no
+    state: started
+
+- name: Authorize docker-novolume-plugin & setup log maximums
+  lineinfile:
+    dest: /etc/sysconfig/docker
+    backup: true
+    regexp: '^OPTIONS='
+    line: "OPTIONS='--selinux-enabled --log-driver=json-file --signature-verification=false --authorization-plugin=docker-novolume-plugin --log-opt max-size=1M --log-opt max-file=3'"
+
+- name: Restart docker
+  systemd:
+    state: restarted
+    name: docker
+
